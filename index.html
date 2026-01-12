@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>¿Qué comemos hoy?</title>
+<style>
+body { font-family: Arial; background:#f3f4f6; padding:20px; }
+.card { max-width:420px; margin:auto; background:white; padding:20px; border-radius:16px; }
+button { padding:6px 10px; border:none; border-radius:8px; margin:2px; cursor:pointer; }
+.votar { background:#22c55e; color:white; }
+.borrar { background:#ef4444; color:white; }
+.agregar { background:#3b82f6; color:white; }
+.cerrar { background:#8b5cf6; color:white; }
+input { padding:6px; width:100%; margin-top:5px; }
+</style>
+</head>
+<body>
+
+<div class="card" id="app"></div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script>
+const PERSONAS = ["Mamá","Papá","Alfre","Benja"];
+const hoy = new Date().toISOString().split("T")[0];
+let persona = "";
+
+// 👇 PEGA TU CONFIGURACIÓN DE FIREBASE AQUÍ 👇
+const firebaseConfig = {
+  apiKey: "AIzaSyDqqKDKvGb3jGA_Zvwf51-hR0mxXmlmzl0",
+  authDomain: "comida-3e1c1.firebaseapp.com",
+  projectId: "comida-3e1c1",
+  storageBucket: "comida-3e1c1.appspot.com",
+  messagingSenderId: "266746473738",
+  appId: "1:266746473738:web:7b758f47cfc6310f7d9ef3"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+// ---- NO TOQUES NADA DEBAJO DE ESTA LÍNEA ----
+function render() {
+  const app = document.getElementById("app");
+  if (!persona) {
+    app.innerHTML = `
+      <h2>¿Quién va a votar?</h2>
+      ${PERSONAS.map(p=>`<button onclick="elegirPersona('${p}')">${p}</button>`).join("")}
+    `;
+    return;
+  }
+
+  db.collection("votosPorDia").doc(hoy).get().then(doc=>{
+    let data = doc.exists ? doc.data() : {
+      Mamá:0, Papá:0, Alfre:0, Benja:0,
+      ganador:"",
+      platos:[
+        {nombre:"Arroz con pollo", votos:0},
+        {nombre:"Pasta", votos:0},
+        {nombre:"Lentejas", votos:0}
+      ]
+    };
+
+    const ganador = data.platos.reduce((a,b)=>a.votos>b.votos?a:b);
+
+    app.innerHTML = `
+      <h2>🍽️ ¿Qué comemos hoy?</h2>
+      <p>Votando como: <b>${persona}</b></p>
+      <button onclick="cambiarPersona()">Cambiar persona</button>
+
+      <ul>
+        ${data.platos.map((p,i)=>`
+          <li>${p.nombre} (${p.votos})
+            <button class="votar" ${data[persona]>=1?"disabled":""} onclick="votar(${i})">Votar</button>
+          </li>
+        `).join("")}
+      </ul>
+
+      <input id="nuevo" placeholder="Sugerir plato">
+      <button class="agregar" onclick="agregar()">Agregar</button>
+
+      <hr>
+      <p>🥇 Ganador actual: <b>${ganador.nombre}</b></p>
+
+      <hr>
+      <h4>📅 Historial</h4>
+      <ul id="historial"></ul>
+    `;
+
+    db.collection("votosPorDia").get().then(snapshot=>{
+      document.getElementById("historial").innerHTML =
+        snapshot.docs.map(d=>`<li>${d.id}: ${d.data().ganador}</li>`).join("");
+    });
+  });
+}
+
+function elegirPersona(p){ persona=p; render(); }
+function cambiarPersona(){ persona=""; render(); }
+
+function votar(i){
+  const ref = db.collection("votosPorDia").doc(hoy);
+  ref.get().then(doc=>{
+    let data = doc.exists ? doc.data() : {
+      Mamá:0, Papá:0, Alfre:0, Benja:0,
+      platos:[]
+    };
+    if(data[persona]>=1) return;
+    data.platos[i].votos++;
+    data[persona]=1;
+    data.ganador = data.platos.reduce((a,b)=>a.votos>b.votos?a:b).nombre;
+    ref.set(data).then(()=>render());
+  });
+}
+
+function agregar(){
+  const input = document.getElementById("nuevo");
+  if(!input.value.trim()) return;
+  const ref = db.collection("votosPorDia").doc(hoy);
+  ref.get().then(doc=>{
+    let data = doc.exists ? doc.data() : {platos:[]};
+    data.platos.push({nombre:input.value, votos:0});
+    ref.set(data).then(()=>render());
+  });
+}
+
+render();
+</script>
+</body>
+</html>
