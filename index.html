@@ -4,19 +4,22 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>¿Qué comemos hoy?</title>
+
 <style>
 body { font-family: Arial; background:#f3f4f6; padding:20px; }
-.card { max-width:420px; margin:auto; background:white; padding:20px; border-radius:16px; }
+.card { max-width:500px; margin:auto; background:white; padding:20px; border-radius:16px; }
 button { padding:6px 10px; border:none; border-radius:8px; margin:2px; cursor:pointer; }
 .votar { background:#22c55e; color:white; }
+.quitar { background:#f97316; color:white; }
 .borrar { background:#ef4444; color:white; }
 .agregar { background:#3b82f6; color:white; }
 .cerrar { background:#8b5cf6; color:white; }
-input { padding:6px; width:100%; margin-top:5px; }
+input, textarea { padding:6px; width:100%; margin-top:5px; }
+hr { margin:15px 0; }
 </style>
 </head>
-<body>
 
+<body>
 <div class="card" id="app"></div>
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -27,7 +30,7 @@ const PERSONAS = ["Mamá","Papá","Alfre","Benja"];
 const hoy = new Date().toISOString().split("T")[0];
 let persona = "";
 
-// 👇 PEGA TU CONFIGURACIÓN DE FIREBASE AQUÍ 👇
+/* FIREBASE */
 const firebaseConfig = {
   apiKey: "AIzaSyDqqKDKvGb3jGA_Zvwf51-hR0mxXmlmzl0",
   authDomain: "comida-3e1c1.firebaseapp.com",
@@ -40,12 +43,13 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-// ---- NO TOQUES NADA DEBAJO DE ESTA LÍNEA ----
-function render() {
+/* ---------- APP ---------- */
+function render(){
   const app = document.getElementById("app");
-  if (!persona) {
+
+  if(!persona){
     app.innerHTML = `
-      <h2>¿Quién va a votar?</h2>
+      <h2>¿Quién vota?</h2>
       ${PERSONAS.map(p=>`<button onclick="elegirPersona('${p}')">${p}</button>`).join("")}
     `;
     return;
@@ -53,74 +57,122 @@ function render() {
 
   db.collection("votosPorDia").doc(hoy).get().then(doc=>{
     let data = doc.exists ? doc.data() : {
-      Mamá:0, Papá:0, Alfre:0, Benja:0,
-      ganador:"",
-      platos:[
-        {nombre:"Arroz con pollo", votos:0},
-        {nombre:"Pasta", votos:0},
-        {nombre:"Lentejas", votos:0}
-      ]
+      almuerzo: [],
+      merienda: [],
+      cerrado: false,
+      resultado: {}
     };
 
-    const ganador = data.platos.reduce((a,b)=>a.votos>b.votos?a:b);
-
     app.innerHTML = `
-      <h2>🍽️ ¿Qué comemos hoy?</h2>
-      <p>Votando como: <b>${persona}</b></p>
+      <h2>🍽️ Comidas del día</h2>
+      <p>Votando como <b>${persona}</b></p>
       <button onclick="cambiarPersona()">Cambiar persona</button>
 
-      <ul>
-        ${data.platos.map((p,i)=>`
-          <li>${p.nombre} (${p.votos})
-            <button class="votar" ${data[persona]>=1?"disabled":""} onclick="votar(${i})">Votar</button>
-          </li>
-        `).join("")}
-      </ul>
-
-      <input id="nuevo" placeholder="Sugerir plato">
-      <button class="agregar" onclick="agregar()">Agregar</button>
+      ${renderSeccion("Almuerzo","almuerzo",data)}
+      <hr>
+      ${renderSeccion("Merienda","merienda",data)}
 
       <hr>
-      <p>🥇 Ganador actual: <b>${ganador.nombre}</b></p>
+      <button class="cerrar" onclick="cerrarDia()">🔒 Cerrar día</button>
 
       <hr>
-      <h4>📅 Historial</h4>
+      <h3>📅 Historial</h3>
       <ul id="historial"></ul>
     `;
 
-    db.collection("votosPorDia").get().then(snapshot=>{
-      document.getElementById("historial").innerHTML =
-        snapshot.docs.map(d=>`<li>${d.id}: ${d.data().ganador}</li>`).join("");
-    });
+    cargarHistorial();
   });
 }
 
+function renderSeccion(titulo,tipo,data){
+  const lista = data[tipo];
+  const ganador = lista.length
+    ? lista.reduce((a,b)=>a.votos>b.votos?a:b).nombre
+    : "—";
+
+  return `
+    <h3>${titulo}</h3>
+    <p>🥇 Ganador actual: <b>${ganador}</b></p>
+
+    <ul>
+      ${lista.map((p,i)=>`
+        <li>
+          <b>${p.nombre}</b> (${p.votos})
+          <br><small>${p.ingredientes || ""}</small><br>
+          <button class="votar" onclick="votar('${tipo}',${i},1)">+ Votar</button>
+          <button class="quitar" onclick="votar('${tipo}',${i},-1)">- Quitar</button>
+          <button class="borrar" onclick="borrar('${tipo}',${i})">❌</button>
+        </li>
+      `).join("")}
+    </ul>
+
+    <input id="${tipo}-nombre" placeholder="Nuevo plato">
+    <textarea id="${tipo}-ing" placeholder="Ingredientes"></textarea>
+    <button class="agregar" onclick="agregar('${tipo}')">Agregar</button>
+  `;
+}
+
+/* ---------- ACCIONES ---------- */
 function elegirPersona(p){ persona=p; render(); }
 function cambiarPersona(){ persona=""; render(); }
 
-function votar(i){
+function votar(tipo,i,delta){
   const ref = db.collection("votosPorDia").doc(hoy);
   ref.get().then(doc=>{
-    let data = doc.exists ? doc.data() : {
-      Mamá:0, Papá:0, Alfre:0, Benja:0,
-      platos:[]
-    };
-    if(data[persona]>=1) return;
-    data.platos[i].votos++;
-    data[persona]=1;
-    data.ganador = data.platos.reduce((a,b)=>a.votos>b.votos?a:b).nombre;
-    ref.set(data).then(()=>render());
+    let data = doc.data();
+    data[tipo][i].votos = Math.max(0, data[tipo][i].votos + delta);
+    ref.set(data).then(render);
   });
 }
 
-function agregar(){
-  const input = document.getElementById("nuevo");
-  if(!input.value.trim()) return;
+function borrar(tipo,i){
   const ref = db.collection("votosPorDia").doc(hoy);
   ref.get().then(doc=>{
-    let data = doc.exists ? doc.data() : {platos:[]};
-    data.platos.push({nombre:input.value, votos:0});
-    ref.set(data).then(()=>render());
+    let data = doc.data();
+    data[tipo].splice(i,1);
+    ref.set(data).then(render);
+  });
+}
+
+function agregar(tipo){
+  const nombre = document.getElementById(tipo+"-nombre").value.trim();
+  const ing = document.getElementById(tipo+"-ing").value.trim();
+  if(!nombre) return;
+
+  const ref = db.collection("votosPorDia").doc(hoy);
+  ref.get().then(doc=>{
+    let data = doc.exists ? doc.data() : {almuerzo:[], merienda:[]};
+    data[tipo].push({nombre, votos:0, ingredientes: ing});
+    ref.set(data).then(render);
+  });
+}
+
+function cerrarDia(){
+  const ref = db.collection("votosPorDia").doc(hoy);
+  ref.get().then(doc=>{
+    let data = doc.data();
+
+    const alm = data.almuerzo.length
+      ? data.almuerzo.reduce((a,b)=>a.votos>b.votos?a:b).nombre
+      : "—";
+    const mer = data.merienda.length
+      ? data.merienda.reduce((a,b)=>a.votos>b.votos?a:b).nombre
+      : "—";
+
+    data.cerrado = true;
+    data.resultado = { almuerzo: alm, merienda: mer };
+
+    ref.set(data).then(render);
+  });
+}
+
+function cargarHistorial(){
+  db.collection("votosPorDia").get().then(snap=>{
+    document.getElementById("historial").innerHTML =
+      snap.docs
+        .filter(d=>d.data().cerrado)
+        .map(d=>`<li>${d.id} → 🍽️ ${d.data().resultado.almuerzo} / ☕ ${d.data().resultado.merienda}</li>`)
+        .join("");
   });
 }
 
